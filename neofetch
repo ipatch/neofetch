@@ -28,12 +28,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-version="4.0.3"
+version="5.0.1"
 
 bash_version="${BASH_VERSION/.*}"
 sys_locale="${LANG:-C}"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"
-PATH="/usr/xpg4/bin:/usr/sbin:/sbin:/usr/etc:/usr/libexec:${PATH}"
+PATH="${PATH}:/usr/xpg4/bin:/usr/sbin:/sbin:/usr/etc:/usr/libexec"
 reset='\e[0m'
 shopt -s nocasematch
 
@@ -156,7 +156,7 @@ uptime_shorthand="on"
 # on:   '998 (pacman), 8 (flatpak), 4 (snap)'
 # tiny: '908 (pacman, flatpak, snap)'
 # off:  '908'
-package_managers="tiny"
+package_managers="on"
 
 
 # Shell
@@ -201,7 +201,7 @@ speed_type="bios_limit"
 #
 # Default: 'off'
 # Values: 'on', 'off'.
-# Flag:    --speed_shorthand.
+# Flag:    --speed_shorthand
 # NOTE: This flag is not supported in systems with CPU speed less than 1 GHz
 #
 # Example:
@@ -445,7 +445,6 @@ disk_subtitle="mount"
 # sayonara
 # smplayer
 # spotify
-# Spotify
 # tomahawk
 # vlc
 # xmms2d
@@ -475,6 +474,12 @@ song_format="%artist% - %album% - %title%"
 #
 # off: 'Song: The Fratellis - Costello Music - Chelsea Dagger'
 song_shorthand="off"
+
+# 'mpc' arguments (specify a host, password etc).
+#
+# Default:  ''
+# Example: mpc_args=(-h HOST -P PASSWORD)
+mpc_args=()
 
 
 # Text Colors
@@ -924,7 +929,7 @@ get_distro() {
             fi
 
             distro="$(trim_quotes "$distro")"
-            distro="${distro/'NAME='}"
+            distro="${distro/NAME=}"
         ;;
 
         "Mac OS X")
@@ -1034,7 +1039,7 @@ get_model() {
         ;;
 
         "Mac OS X")
-            if [[ "$(kextstat | grep -F "FakeSMC")" != "" ]]; then
+            if [[ "$(kextstat | grep -E "FakeSMC|VirtualSMC")" != "" ]]; then
                 model="Hackintosh (SMBIOS: $(sysctl -n hw.model))"
             else
                 model="$(sysctl -n hw.model)"
@@ -1131,6 +1136,7 @@ get_model() {
 
     case "$model" in
         "Standard PC"*) model="KVM/QEMU (${model})" ;;
+        "OpenBSD"*)     model="vmm (${model})" ;;
     esac
 }
 
@@ -1178,7 +1184,7 @@ get_uptime() {
 
                 "Mac OS X" | "iPhone OS" | "BSD" | "FreeMiNT")
                     boot="$(sysctl -n kern.boottime)"
-                    boot="${boot/'{ sec = '}"
+                    boot="${boot/\{ sec = }"
                     boot="${boot/,*}"
 
                     # Get current date in seconds.
@@ -1269,6 +1275,7 @@ get_packages() {
             has "sorcery"    && tot gaze installed
             has "alps"       && tot alps showinstalled
             has "butch"      && tot butch list
+            has "pkginfo"    && tot pkginfo -i
 
             # Counting files/dirs.
             has "emerge"     && dir /var/db/pkg/*/*/
@@ -1285,8 +1292,7 @@ get_packages() {
             has "kpm-pkg" && ((packages+="$(kpm  --get-selections | grep -cv deinstall$)"))
 
             case "$kernel_name" in
-                "FreeBSD") has "pkg"     && tot pkg info ;;
-                "SunOS")   has "pkginfo" && tot pkginfo -i ;;
+                "FreeBSD") has "pkg" && tot pkg info ;;
                 *)
                     has "pkg" && dir /var/db/pkg/*
 
@@ -1304,9 +1310,10 @@ get_packages() {
         ;;
 
         "Mac OS X" | "MINIX")
-            has "port"  && tot port installed && ((packages-=1))
-            has "brew"  && dir /usr/local/Cellar/*
-            has "pkgin" && tot pkgin list
+            has "port"    && tot port installed && ((packages-=1))
+            has "brew"    && dir /usr/local/Cellar/*
+            has "pkgin"   && tot pkgin list
+            has "nix-env" && dir /nix/store/*/
         ;;
 
         "AIX"| "FreeMiNT")
@@ -1361,7 +1368,7 @@ get_shell() {
             "sh" | "ash" | "dash") ;;
 
             "mksh" | "ksh")
-                shell+="$("$SHELL" -c "printf %s \$KSH_VERSION")"
+                shell+="$("$SHELL" -c "printf %s \"\$KSH_VERSION\"")"
                 shell="${shell/ * KSH}"
                 shell="${shell/version}"
             ;;
@@ -1413,7 +1420,7 @@ get_de() {
             ((wm_run != 1)) && get_wm
 
             if [[ "$XDG_CURRENT_DESKTOP" ]]; then
-                de="${XDG_CURRENT_DESKTOP/'X-'}"
+                de="${XDG_CURRENT_DESKTOP/X\-}"
                 de="${de/Budgie:GNOME/Budgie}"
                 de="${de/:Unity7:ubuntu}"
 
@@ -1439,7 +1446,7 @@ get_de() {
     esac
 
     # Fallback to using xprop.
-    [[ "$DISPLAY" && -z "$de" ]] && \
+    [[ "$DISPLAY" && -z "$de" ]] && type -p xprop &>/dev/null && \
         de="$(xprop -root | awk '/KDE_SESSION_VERSION|^_MUFFIN|xfce4|xfce5/')"
 
     # Format strings.
@@ -1468,8 +1475,13 @@ get_wm() {
     # If function was run, stop here.
     ((wm_run == 1)) && return
 
+    case "$uname" in
+        *"OpenBSD"*)    ps_flags=(x -c) ;;
+        *)              ps_flags=(-e) ;;
+    esac
+
     if [[ "$WAYLAND_DISPLAY" ]]; then
-        wm="$(ps -e | grep -m 1 -o -F \
+        wm="$(ps "${ps_flags[@]}" | grep -m 1 -o -F \
                            -e "arcan" \
                            -e "asc" \
                            -e "clayland" \
@@ -1497,20 +1509,22 @@ get_wm() {
                            -e "weston")"
 
     elif [[ "$DISPLAY" && "$os" != "Mac OS X" && "$os" != "FreeMiNT" ]]; then
-        id="$(xprop -root -notype _NET_SUPPORTING_WM_CHECK)"
-        id="${id##* }"
-        wm="$(xprop -id "$id" -notype -len 100 -f _NET_WM_NAME 8t)"
-        wm="${wm/*WM_NAME = }"
-        wm="${wm/\"}"
-        wm="${wm/\"*}"
+        if type -p xprop &>/dev/null; then
+            id="$(xprop -root -notype _NET_SUPPORTING_WM_CHECK)"
+            id="${id##* }"
+            wm="$(xprop -id "$id" -notype -len 100 -f _NET_WM_NAME 8t)"
+            wm="${wm/*WM_NAME = }"
+            wm="${wm/\"}"
+            wm="${wm/\"*}"
+        fi
 
         # Window Maker does not set _NET_WM_NAME
         [[ "$wm" =~ "WINDOWMAKER" ]] && wm="wmaker"
-
         # Fallback for non-EWMH WMs.
         [[ -z "$wm" ]] && \
-            wm="$(ps -e | grep -m 1 -o -F \
+            wm="$(ps "${ps_flags[@]}" | grep -m 1 -o -F \
                                -e "catwm" \
+                               -e "fvwm" \
                                -e "dwm" \
                                -e "2bwm" \
                                -e "monsterwm" \
@@ -1674,7 +1688,7 @@ get_wm_theme() {
                 wm_theme="$(awk '/(decoration)/ {gsub(/\[/,"",$1); print $1; exit}' "$kdebugrc")"
             fi
 
-            wm_theme="${wm_theme/'theme='}"
+            wm_theme="${wm_theme/theme=}"
         ;;
 
         "Quartz Compositor")
@@ -1705,7 +1719,7 @@ get_wm_theme() {
             path="${path//\\/\/}"
 
             wm_theme="$(grep '^session\.styleFile:' "${path/\.exe/.rc}")"
-            wm_theme="${wm_theme/'session.styleFile: '}"
+            wm_theme="${wm_theme/session\.styleFile: }"
             wm_theme="${wm_theme##*\\}"
             wm_theme="${wm_theme%.*}"
         ;;
@@ -1715,11 +1729,6 @@ get_wm_theme() {
 }
 
 get_cpu() {
-    # NetBSD emulates the Linux /proc filesystem instead of using sysctl for hw
-    # information so we have to use this block below which temporarily sets the
-    # OS to "Linux" for the duration of this function.
-    [[ "$distro" == "NetBSD"* ]] && local os="Linux"
-
     case "$os" in
         "Linux" | "MINIX" | "Windows")
             # Get CPU name.
@@ -2053,11 +2062,10 @@ get_gpu() {
                         brand="${brand:-${gpu/*AMD*/AMD}}"
                         brand="${brand:-${gpu/*ATI*/ATi}}"
 
-                        gpu="${gpu/'[AMD/ATI]' }"
-                        gpu="${gpu/'[AMD]' }"
+                        gpu="${gpu/\[AMD\/ATI\] }"
+                        gpu="${gpu/\[AMD\] }"
                         gpu="${gpu/OEM }"
                         gpu="${gpu/Advanced Micro Devices, Inc.}"
-                        gpu="${gpu/ \/ *}"
                         gpu="${gpu/*\[}"
                         gpu="${gpu/\]*}"
                         gpu="$brand $gpu"
@@ -2071,10 +2079,11 @@ get_gpu() {
 
                     *"intel"*)
                         gpu="${gpu/*Intel/Intel}"
-                        gpu="${gpu/'(R)'}"
-                        gpu="${gpu/'Corporation'}"
+                        gpu="${gpu/\(R\)}"
+                        gpu="${gpu/Corporation}"
                         gpu="${gpu/ \(*}"
                         gpu="${gpu/Integrated Graphics Controller}"
+                        gpu="${gpu/*Xeon*/Intel HD Graphics}"
 
                         [[ -z "$(trim "$gpu")" ]] && gpu="Intel Integrated Graphics"
                     ;;
@@ -2103,7 +2112,7 @@ get_gpu() {
             else
                 gpu="$(system_profiler SPDisplaysDataType |\
                        awk -F': ' '/^\ *Chipset Model:/ {printf $2 ", "}')"
-                gpu="${gpu//'/ $'}"
+                gpu="${gpu//\/ \$}"
                 gpu="${gpu%,*}"
 
                 cache "gpu" "$gpu"
@@ -2163,7 +2172,7 @@ get_gpu() {
 
                 *)
                     gpu="$(glxinfo | grep -F 'OpenGL renderer string')"
-                    gpu="${gpu/'OpenGL renderer string: '}"
+                    gpu="${gpu/OpenGL renderer string: }"
                 ;;
             esac
         ;;
@@ -2334,7 +2343,8 @@ get_song() {
     )
 
     printf -v players "|%s" "${players[@]}"
-    player="$(ps -e | awk -v pattern="(${players:1})$" '$0 ~ pattern {print $NF; exit}')"
+    player="$(ps aux | awk -v pattern="(${players:1})" \
+                '!/ awk / && match($0,pattern){print substr($0,RSTART,RLENGTH); exit}')"
 
     [[ "$music_player" && "$music_player" != "auto" ]] && \
         player="$music_player"
@@ -2352,7 +2362,7 @@ get_song() {
     }
 
     case "${player/*\/}" in
-        "mpd"* | "mopidy"*) song="$(mpc -f '%artist% \n %album% \n %title%' current)" ;;
+        "mpd"*|"mopidy"*) song="$(mpc -f '%artist%\n%album%\n%title%' current "${mpc_args[@]}")" ;;
         "mocp"*)          song="$(mocp -Q '%artist \n %album \n %song')" ;;
         "google play"*)   song="$(gpmdp-remote current)" ;;
         "rhythmbox"*)     song="$(rhythmbox-client --print-playing-format '%ta \n %at \n %tt')" ;;
@@ -2747,14 +2757,14 @@ get_term() {
                 term="$(tty)"
             ;;
 
-            "ruby"|"1"|"systemd"|"sshd"*|"python"*|"USER"*"PID"*|"kdeinit"*|"launchd"*)
+            "ruby"|"1"|"tmux"*|"systemd"|"sshd"*|"python"*|"USER"*"PID"*|"kdeinit"*|"launchd"*)
                 break
             ;;
 
             "gnome-terminal-") term="gnome-terminal" ;;
+            "urxvtd")          term="urxvt" ;;
             *"nvim")           term="Neovim Terminal" ;;
             *"NeoVimServer"*)  term="VimR Terminal" ;;
-            *"tmux"*)          term="tmux" ;;
             *)                 term="${name##*/}" ;;
         esac
     done
@@ -2868,7 +2878,7 @@ END
                               END { print font " " size}' "${confs[0]}")"
         ;;
 
-        "konsole"*)
+        "konsole" | "yakuake")
             # Get Process ID of current konsole window / tab
             child="$(get_ppid "$$")"
 
@@ -3012,7 +3022,7 @@ END
 
         "urxvt" | "urxvtd" | "rxvt-unicode" | "xterm")
             xrdb="$(xrdb -query)"
-            term_font="$(grep -i "${term/d}"'\**\.*font' <<< "$xrdb")"
+            term_font="$(grep -im 1 -e "^${term/d}"'\**\.*font' -e '^\*font' <<< "$xrdb")"
             term_font="${term_font/*"*font:"}"
             term_font="${term_font/*".font:"}"
             term_font="${term_font/*"*.font:"}"
@@ -3066,6 +3076,7 @@ get_disk() {
     case "$df_version" in
         *"IMitv"*)   df_flags=(-P -g) ;; # AIX
         *"befhikm"*) df_flags=(-P -k) ;; # IRIX
+        *"hiklnP"*) df_flags=(-h) ;; # OpenBSD
 
         *"Tracker"*) # Haiku
             err "Your version of df cannot be used due to the non-standard flags"
@@ -3077,9 +3088,19 @@ get_disk() {
 
     # Create an array called 'disks' where each element is a separate line from
     # df's output. We then unset the first element which removes the column titles.
-    IFS=$'\n' read -d "" -ra disks <<< "$(df "${df_flags[@]}" "${disk_show[@]:-/}")"
-    unset "disks[0]"
-
+    if [[ "$uname" == "OpenBSD" ]]; then
+        # On OpenBSD you can't use df against a /dev/... unless being root or
+        # in the 'operator' group. Making a separate disks array creation.
+        # building an AWK regexp
+        disk_re="${disk_show[*]:-/}"
+        disk_re="${disk_re// /\|}"
+        disk_re="^(${disk_re//\//\\\/})\$"
+        IFS=$'\n' read -d "" -ra disks <<< "$(df "${df_flags[@]}" | \
+            awk -v disk_re="$disk_re" '(NR > 1) && ($1 ~ disk_re || $6 ~ disk_re)')"
+    else
+        IFS=$'\n' read -d "" -ra disks <<< "$(df "${df_flags[@]}" "${disk_show[@]:-/}")"
+        unset "disks[0]"
+    fi
     # Stop here if 'df' fails to print disk info.
     [[ -z "${disks[*]}" ]] && {
         err "Disk: df failed to print the disks, make sure the disk_show array is set properly."
@@ -3089,7 +3110,7 @@ get_disk() {
     for disk in "${disks[@]}"; do
         # Create a second array and make each element split at whitespace this time.
         IFS=" " read -ra disk_info <<< "$disk"
-        disk_perc="${disk_info[4]/'%'}"
+        disk_perc="${disk_info[4]/\%}"
 
         case "$df_version" in
             *"befhikm"*)
@@ -3172,12 +3193,19 @@ get_battery() {
                 ;;
 
                 "OpenBSD"* | "Bitrig"*)
-                    battery0full="$(sysctl -n hw.sensors.acpibat0.watthour0)"
-                    battery0full="${battery0full/ Wh*}"
+                    battery0full="$(sysctl -n   hw.sensors.acpibat0.watthour0\
+                                                hw.sensors.acpibat0.amphour0)"
+                    battery0full="${battery0full%% *}"
 
-                    battery0now="$(sysctl -n hw.sensors.acpibat0.watthour3)"
-                    battery0now="${battery0now/ Wh*}"
+                    battery0now="$(sysctl -n    hw.sensors.acpibat0.watthour3\
+                                                hw.sensors.acpibat0.amphour3)"
+                    battery0now="${battery0now%% *}"
 
+                    state="$(sysctl -n hw.sensors.acpibat0.raw0)"
+                    state="${state##? (battery }"
+                    state="${state%)*}"
+
+                    [[ "${state}" == "charging" ]] && battery_state="charging"
                     [[ "$battery0full" ]] && \
                     battery="$((100 * ${battery0now/\.} / ${battery0full/\.}))%"
                 ;;
@@ -3206,9 +3234,9 @@ get_battery() {
     [[ "$battery_state" ]] && battery+=" Charging"
 
     case "$battery_display" in
-        "bar")     battery="$(bar "${battery/'%'*}" 100)" ;;
-        "infobar") battery="${battery} $(bar "${battery/'%'*}" 100)" ;;
-        "barinfo") battery="$(bar "${battery/'%'*}" 100)${info_color} ${battery}" ;;
+        "bar")     battery="$(bar "${battery/\%*}" 100)" ;;
+        "infobar") battery="${battery} $(bar "${battery/\%*}" 100)" ;;
+        "barinfo") battery="$(bar "${battery/\%*}" 100)${info_color} ${battery}" ;;
     esac
 }
 
@@ -3236,7 +3264,7 @@ get_local_ip() {
 
         "Haiku")
             local_ip="$(ifconfig | awk -F ': ' '/Bcast/ {print $2}')"
-            local_ip="${local_ip/', Bcast'}"
+            local_ip="${local_ip/, Bcast}"
         ;;
     esac
 }
@@ -3382,7 +3410,7 @@ image_backend() {
 }
 
 get_ascii() {
-    if [[ -f "$image_source" ]]; then
+    if [[ -f "$image_source" && ! "$image_source" =~ (png|jpg|jpeg|jpe|svg|gif) ]]; then
         ascii_data="$(< "$image_source")"
     else
         err "Ascii: Ascii file not found, using distro ascii."
@@ -3393,8 +3421,7 @@ get_ascii() {
 
     # Calculate size of ascii file in line length / line count.
     while IFS=$'\n' read -r line; do
-        ((${#line} > ascii_length)) && ascii_length="${#line}"
-        ((++lines))
+        ((++lines,${#line}>ascii_length)) && ascii_length="${#line}"
     done <<< "${ascii_data//\$\{??\}}"
 
     # Colors.
@@ -3406,7 +3433,7 @@ get_ascii() {
     ascii_data="${ascii_data//\$\{c6\}/$c6}"
 
     ((text_padding=ascii_length+gap))
-    printf '%b\n' "$ascii_data"
+    printf '%b\n' "$ascii_data${reset}"
     LC_ALL=C
 }
 
@@ -3481,6 +3508,11 @@ END
                     image="$(decode_url "$image")"
                 ;;
 
+                "GNOME"*)
+                    image="$(gsettings get org.gnome.desktop.background picture-uri)"
+                    image="$(decode_url "$image")"
+                ;;
+
                 *)
                     if type -p feh >/dev/null && [[ -f "${HOME}/.fehbg" ]]; then
                         image="$(awk -F\' '/feh/ {printf $(NF-1)}' "${HOME}/.fehbg")"
@@ -3502,7 +3534,7 @@ END
             esac
 
             # Strip un-needed info from the path.
-            image="${image/'file://'}"
+            image="${image/file:\/\/}"
             image="$(trim_quotes "$image")"
         ;;
     esac
@@ -3548,7 +3580,9 @@ get_window_size() {
     # The escape codes above print the desired output as
     # user input so we have to use read to store the out
     # -put as a variable.
-    IFS=';t' read -d t -t 0.05 -sra term_size
+    # The 1 second timeout is required for older bash
+    IFS=';t' read -d t -t 1 -sra term_size
+    unset IFS
 
     # Split the string into height/width.
     if [[ "$image_backend" == "tycat" ]]; then
@@ -3561,7 +3595,7 @@ get_window_size() {
     fi
 
     [[ "$image_backend" == "kitty" ]] && \
-        IFS=x read -r term_width term_height < <(kitty icat --print-window-size)
+        IFS=x read -r term_width term_height < <(kitty +kitten icat --print-window-size)
 
     # Get terminal width/height if \e[14t is unsupported.
     if (( "${term_width:-0}" < 50 )) && [[ "$DISPLAY" && "$os" != "Mac OS X" ]]; then
@@ -3602,15 +3636,7 @@ get_window_size() {
 
 get_term_size() {
     # Get the terminal size in cells.
-    printf '%b' '\e[18t'
-    IFS=';t' read -d t -t 0.05 -sra term_cells
-
-    lines="${term_cells[1]}"
-    columns="${term_cells[2]}"
-
-    # Fallback to stty if above sequence isn't supported.
-    [[ -z "$lines" || -z "$columns" ]] && \
-        read -r lines columns < <(stty size)
+    read -r lines columns < <(stty size)
 
     # Calculate font size.
     font_width="$((term_width / columns))"
@@ -3641,17 +3667,15 @@ get_image_size() {
         "none")
             # Get image size so that we can do a better crop.
             read -r width height <<< "$(identify -format "%w %h" "$image")"
-            crop_mode="none"
 
             while ((width >= (term_width / 2) || height >= term_height)); do
-                ((width=width/2))
-                ((height=height/2))
+                ((width=width/2,height=height/2))
             done
+
+            crop_mode="none"
         ;;
 
-        *)
-            image_size="${image_size/px}"
-        ;;
+        *)  image_size="${image_size/px}" ;;
     esac
 
     width="${width:-$image_size}"
@@ -3750,7 +3774,7 @@ display_image() {
         ;;
 
         "kitty")
-            kitty icat \
+            kitty +kitten icat \
                 --align left \
                 --place "$((width/font_width))x$((height/font_height))@${xoffset}x${yoffset}" \
             "$image"
@@ -3924,7 +3948,7 @@ trim() {
     set -f
     # shellcheck disable=2048,2086
     set -- $*
-    printf '%s\n' "${*//[[:space:]]/ }"
+    printf '%s\n' "${*//[[:space:]]/}"
     set +f
 }
 
@@ -4171,7 +4195,7 @@ get_ppid() {
     case "$os" in
         "Windows")
             ppid="$(ps -p "${1:-$PPID}" | awk '{printf $2}')"
-            ppid="${ppid/'PPID'}"
+            ppid="${ppid/PPID}"
         ;;
 
         "Linux")
@@ -4192,7 +4216,7 @@ get_process_name() {
     case "$os" in
         "Windows")
             name="$(ps -p "${1:-$PPID}" | awk '{printf $8}')"
-            name="${name/'COMMAND'}"
+            name="${name/COMMAND}"
             name="${name/*\/}"
         ;;
 
@@ -4659,7 +4683,8 @@ get_args() {
                 cpu_temp="C"
 
                 # Known implicit unused variables.
-                printf '%s\n' "$kernel $icons $font $battery $locale"
+                mpc_args=()
+                printf '%s\n' "$kernel $icons $font $battery $locale ${mpc_args[*]}"
             ;;
         esac
 
@@ -4948,7 +4973,7 @@ ${c1}      /\
    /${c2}  __  \
   /  (  )  \
  / __|  |__\\\
-///        \\\\\
+///        \\\\\\
 EOF
         ;;
 
@@ -5414,6 +5439,32 @@ ${c1}    ,:ccccccccclllcd${c3}0000OOOOOOl.
 ${c1}      '::ccccccccc${c3}dOOOOOOOkx:.
 ${c1}        ..,::cccc${c3}xOOOkkko;.
 ${c1}            ..,:${c3}dOkxl:.
+EOF
+        ;;
+
+        "ClearOS"*)
+            set_colors 2
+            read -rd '' ascii_data <<'EOF'
+${c1}             `.--::::::--.`
+         .-:////////////////:-.
+      `-////////////////////////-`
+     -////////////////////////////-
+   `//////////////-..-//////////////`
+  ./////////////:      ://///////////.
+ `//////:..-////:      :////-..-//////`
+ ://////`    -///:.``.:///-`    ://///:
+`///////:.     -////////-`    `:///////`
+.//:--////:.     -////-`    `:////--://.
+./:    .////:.     --`    `:////-    :/.
+`//-`    .////:.        `:////-    `-//`
+ :///-`    .////:.    `:////-    `-///:
+ `/////-`    -///:    :///-    `-/////`
+  `//////-   `///:    :///`   .//////`
+   `:////:   `///:    :///`   -////:`
+     .://:   `///:    :///`   -//:.
+       .::   `///:    :///`   -:.
+             `///:    :///`
+              `...    ...`
 EOF
         ;;
 
@@ -6104,6 +6155,24 @@ ${c1}                     WW
    N00KNW                   KOW
  NKXN                       W0W
 WW                           W
+EOF
+        ;;
+
+        "januslinux"*)
+            set_colors 7
+            read -rd '' ascii_data <<'EOF'
+${c1} ________________
+|\               \
+| \               \
+|  \               \
+|   \ ______________\
+|    |              |
+|    |              |
+|    |              |
+ \   |  januslinux  |
+  \  |              |
+   \ |              |
+    \|______________|
 EOF
         ;;
 
